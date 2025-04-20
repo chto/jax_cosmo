@@ -37,7 +37,8 @@ class inverse_growth_linear_bias(container):
 
     def __call__(self, cosmo, z):
         b = self.params[0]
-        return b / bkgrd.growth_factor(cosmo, z2a(z))
+        g, cosmo = bkgrd.growth_factor(cosmo, z2a(z))
+        return b / g
 
 
 @register_pytree_node_class

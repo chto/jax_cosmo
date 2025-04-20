@@ -5,13 +5,14 @@ from jax.tree_util import register_pytree_node_class
 import jax_cosmo.constants as const
 from jax_cosmo.utils import a2z
 from jax_cosmo.utils import z2a
+from collections import namedtuple
 
 __all__ = ["Cosmology"]
 
 
 @register_pytree_node_class
 class Cosmology:
-    def __init__(self, Omega_c, Omega_b, h, n_s, sigma8, Omega_k, w0, wa, gamma=None):
+    def __init__(self, Omega_c, Omega_b, h, n_s, sigma8, Omega_k, w0, wa, gamma=None, workspace=None):
         """
         Cosmology object, stores primary and derived cosmological parameters.
 
@@ -62,7 +63,12 @@ class Cosmology:
 
         # Create a workspace where functions can store some precomputed
         # results
-        self._workspace = {}
+        self._flags["workspace"] = True
+        if workspace is not  None:
+            self._workspace = workspace
+        else:
+            Workspace=namedtuple('_workspace', ['background_radial_comoving_distance', 'background_growth_factor'])
+            self._workspace = Workspace(None, None) 
 
     def __str__(self):
         return (
@@ -110,6 +116,7 @@ class Cosmology:
 
         if self._flags["gamma_growth"]:
             params += (self._gamma,)
+        params += (self._workspace,)
 
         return (
             params,
@@ -120,7 +127,7 @@ class Cosmology:
     def tree_unflatten(cls, aux_data, children):
         # Retrieve base parameters
         Omega_c, Omega_b, h, n_s, sigma8, Omega_k, w0, wa = children[:8]
-        children = list(children[8:]).reverse()
+        children = list(children[8:])[::-1]
 
         # We extract the remaining parameters in reverse order from how they
         # were inserted
@@ -128,6 +135,10 @@ class Cosmology:
             gamma = children.pop()
         else:
             gamma = None
+        if aux_data['workspace']:
+            workspace = children.pop()
+        else:
+            workspace = None
 
         return cls(
             Omega_c=Omega_c,
@@ -139,6 +150,7 @@ class Cosmology:
             w0=w0,
             wa=wa,
             gamma=gamma,
+            workspace = workspace
         )
 
     # Cosmological parameters, base and derived

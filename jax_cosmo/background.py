@@ -5,6 +5,7 @@ from jax import lax
 import jax_cosmo.constants as const
 from jax_cosmo.scipy.interpolate import interp
 from jax_cosmo.scipy.ode import odeint
+from collections import namedtuple
 
 __all__ = [
     "w",
@@ -220,7 +221,7 @@ def radial_comoving_distance(cosmo, a, log10_amin=-3, steps=256):
         \chi(a) =  R_H \int_a^1 \frac{da^\prime}{{a^\prime}^2 E(a^\prime)}
     """
     # Check if distances have already been computed
-    if not "background.radial_comoving_distance" in cosmo._workspace.keys():
+    if cosmo._workspace.background_radial_comoving_distance is None:
         # Compute tabulated array
         atab = np.logspace(log10_amin, 0.0, steps)
 
@@ -231,15 +232,15 @@ def radial_comoving_distance(cosmo, a, log10_amin=-3, steps=256):
         chitab = odeint(dchioverdlna, 0.0, np.log(atab))
         # np.clip(- 3000*np.log(atab), 0, 10000)#odeint(dchioverdlna, 0., np.log(atab), cosmo)
         chitab = chitab[-1] - chitab
-
-        cache = {"a": atab, "chi": chitab}
-        cosmo._workspace["background.radial_comoving_distance"] = cache
+        Cache = namedtuple('cache', ['a', 'chi'])
+        cache = Cache(atab, chitab)
+        cosmo._workspace= cosmo._workspace._replace(background_radial_comoving_distance= cache) 
     else:
-        cache = cosmo._workspace["background.radial_comoving_distance"]
+        cache = cosmo._workspace.background_radial_comoving_distance
 
     a = np.atleast_1d(a)
     # Return the results as an interpolation of the table
-    return np.clip(interp(a, cache["a"], cache["chi"]), 0.0)
+    return np.clip(interp(a, cache.a, cache.chi), 0.0), cosmo
 
 
 def a_of_chi(cosmo, chi):
@@ -260,11 +261,11 @@ def a_of_chi(cosmo, chi):
       Scale factors corresponding to requested distances
     """
     # Check if distances have already been computed, force computation otherwise
-    if not "background.radial_comoving_distance" in cosmo._workspace.keys():
+    if cosmo._workspace.background_radial_comoving_distance is None:
         radial_comoving_distance(cosmo, 1.0)
-    cache = cosmo._workspace["background.radial_comoving_distance"]
+    cache = cosmo._workspace.background_radial_comoving_distance
     chi = np.atleast_1d(chi)
-    return interp(chi, cache["chi"], cache["a"])
+    return interp(chi, cache.chi, cache.a)
 
 
 def dchioverda(cosmo, a):
@@ -435,9 +436,9 @@ def growth_rate(cosmo, a):
     see :cite:`2019:Euclid Preparation VII, eqn.32`
     """
     if cosmo._flags["gamma_growth"]:
-        return _growth_rate_gamma(cosmo, a)
+        return _growth_rate_gamma(cosmo, a), cosmo
     else:
-        return _growth_rate_ODE(cosmo, a)
+        return _growth_rate_ODE(cosmo, a), cosmo
 
 
 def _growth_factor_ODE(cosmo, a, log10_amin=-3, steps=128, eps=1e-4):
@@ -458,7 +459,7 @@ def _growth_factor_ODE(cosmo, a, log10_amin=-3, steps=128, eps=1e-4):
         Growth factor computed at requested scale factor
     """
     # Check if growth has already been computed
-    if not "background.growth_factor" in cosmo._workspace.keys():
+    if cosmo._workspace.background_growth_factor is None:
         # Compute tabulated array
         atab = np.logspace(log10_amin, 0.0, steps)
 
@@ -481,11 +482,12 @@ def _growth_factor_ODE(cosmo, a, log10_amin=-3, steps=128, eps=1e-4):
         # To transform from dD/da to dlnD/dlna: dlnD/dlna = a / D dD/da
         ftab = y[:, 1] / y1[-1] * atab / gtab
 
-        cache = {"a": atab, "g": gtab, "f": ftab}
-        cosmo._workspace["background.growth_factor"] = cache
+        Cache = namedtuple('cache', ['a', 'g' ,'f'])
+        cache = Cache(atab, gtab, ftab)
+        cosmo._workspace= cosmo._workspace._replace(background_growth_factor = cache)
     else:
-        cache = cosmo._workspace["background.growth_factor"]
-    return np.clip(interp(a, cache["a"], cache["g"]), 0.0, 1.0)
+        cache = cosmo._workspace.background_growth_factor
+    return np.clip(interp(a, cache.a, cache.g), 0.0, 1.0), cosmo
 
 
 def _growth_rate_ODE(cosmo, a):
@@ -506,10 +508,10 @@ def _growth_rate_ODE(cosmo, a):
         Growth rate computed at requested scale factor
     """
     # Check if growth has already been computed, if not, compute it
-    if not "background.growth_factor" in cosmo._workspace.keys():
-        _growth_factor_ODE(cosmo, np.atleast_1d(1.0))
-    cache = cosmo._workspace["background.growth_factor"]
-    return interp(a, cache["a"], cache["f"])
+    if cosmo._workspace.background_growth_factor is None:
+        _, cosmo = _growth_factor_ODE(cosmo, np.atleast_1d(1.0))
+    cache = cosmo._workspace.background_growth_factor
+    return interp(a, cache.a, cache.f), cosmo
 
 
 def _growth_factor_gamma(cosmo, a, log10_amin=-3, steps=128):
@@ -531,7 +533,7 @@ def _growth_factor_gamma(cosmo, a, log10_amin=-3, steps=128):
 
     """
     # Check if growth has already been computed, if not, compute it
-    if not "background.growth_factor" in cosmo._workspace.keys():
+    if cosmo._workspace.background_growth_factor is None:
         # Compute tabulated array
         atab = np.logspace(log10_amin, 0.0, steps)
 
@@ -541,11 +543,13 @@ def _growth_factor_gamma(cosmo, a, log10_amin=-3, steps=128):
 
         gtab = np.exp(odeint(integrand, np.log(atab[0]), np.log(atab)))
         gtab = gtab / gtab[-1]  # Normalize to a=1.
-        cache = {"a": atab, "g": gtab}
-        cosmo._workspace["background.growth_factor"] = cache
+
+        Cache = namedtuple('cache', ['a', 'g'])
+        cache = Cache(atab, gtab)
+        cosmo._workspace= cosmo._workspace._replace(background_growth_factor = cache)
     else:
-        cache = cosmo._workspace["background.growth_factor"]
-    return np.clip(interp(a, cache["a"], cache["g"]), 0.0, 1.0)
+        cache = cosmo._workspace.background_growth_factor
+    return np.clip(interp(a, cache.a, cache.g), 0.0, 1.0), cosmo
 
 
 def _growth_rate_gamma(cosmo, a):

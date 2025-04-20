@@ -121,8 +121,9 @@ def nla_kernel(cosmo, pzs, bias, z, ell):
     radial_kernel = dndz * b * bkgrd.H(cosmo, z2a(z))
     # Apply common A_IA normalization to the kernel
     # Joachimi et al. (2011), arXiv: 1008.3491, Eq. 6.
+    g, cosmo = bkgrd.growth_factor(cosmo, z2a(z))
     radial_kernel *= (
-        -(5e-14 * const.rhocrit) * cosmo.Omega_m / bkgrd.growth_factor(cosmo, z2a(z))
+        -(5e-14 * const.rhocrit) * cosmo.Omega_m / g
     )
     # Constant factor
     constant_factor = 1.0
